@@ -1,12 +1,22 @@
-module Jira.Api exposing (Cred, ApiCallError, Project, createAnonymousCred, createBasicAuthCred, getProjectData, getProjects, getAllProjects, apiErrorToString)
+module Jira.Api exposing
+    ( ApiCallError
+    , Cred
+    , Project
+    , apiErrorToString
+    , createAnonymousCred
+    , createBasicAuthCred
+    , getAllProjects
+    , getProjectData
+    , getProjects
+    )
 
 import Base64
 import Http
 import Jira.Pagination exposing (Page, PageRequest, pageDecoder, pageRequestToQueryParams)
 import Json.Decode as D
 import Regex
-import Url.Builder
 import Task exposing (Task)
+import Url.Builder
 
 
 type JiraUrl
@@ -50,15 +60,19 @@ type ApiCallError
     = HttpError Http.Error
     | InvalidCreds String
 
+
 apiErrorToString : ApiCallError -> String
 apiErrorToString error =
     case error of
         HttpError (Http.BadPayload errDetails _) ->
             errDetails
+
         HttpError _ ->
             "Http error"
+
         InvalidCreds errDetails ->
             errDetails
+
 
 getProjectData : Project -> ProjectData
 getProjectData (Project projectData) =
@@ -110,26 +124,31 @@ createBasicAuthCred urlToJira ( username, password ) =
 
 apiGet : D.Decoder response -> Cred -> String -> ApiTask response
 apiGet decoder cred resource =
-     { method = "GET"
-     , headers = []
-     , url = resource
-     , body = Http.emptyBody
-     , expect = Http.expectJson decoder
-     , timeout = Nothing
-     , withCredentials = False
-     }
+    { method = "GET"
+    , headers = []
+    , url = resource
+    , body = Http.emptyBody
+    , expect = Http.expectJson decoder
+    , timeout = Nothing
+    , withCredentials = False
+    }
         |> authorizeApiRequestConfig cred
         |> Http.request
         |> Http.toTask
-        |> Task.mapError (\err ->
-            case err of
-                Http.BadStatus response ->
-                    if response.status.code == 401 then
-                        InvalidCreds "Invalid user or password"
-                    else
-                        HttpError (Http.BadStatus response)
-                httpError -> HttpError httpError
-        )
+        |> Task.mapError
+            (\err ->
+                case err of
+                    Http.BadStatus response ->
+                        if response.status.code == 401 then
+                            InvalidCreds "Invalid user or password"
+
+                        else
+                            HttpError (Http.BadStatus response)
+
+                    httpError ->
+                        HttpError httpError
+            )
+
 
 type alias RequestConfig a =
     { method : String
@@ -140,6 +159,7 @@ type alias RequestConfig a =
     , timeout : Maybe Float
     , withCredentials : Bool
     }
+
 
 authorizeApiRequestConfig : Cred -> RequestConfig a -> RequestConfig a
 authorizeApiRequestConfig cred request =
@@ -176,10 +196,14 @@ projectDecoder =
             (D.field "self" D.string)
             (D.field "simplified" D.bool)
 
+
+
 -- API TASKS
+
 
 type alias ApiTask response =
     Task ApiCallError response
+
 
 getProjects : Cred -> PageRequest -> ApiTask (Page Project)
 getProjects cred pagination =
@@ -195,6 +219,7 @@ getProjects cred pagination =
     in
     apiGet decoder cred resource
 
+
 requestPageForFetchAllTask =
     Jira.Pagination.pageRequest (Jira.Pagination.paginationConfig 500) 1
 
@@ -205,20 +230,27 @@ getAll pageFetchTask cred =
         |> Task.andThen
             (\firstPageResult ->
                 let
-                    firstPageItems = Jira.Pagination.getItems firstPageResult
-                    pagesCount = Jira.Pagination.totalPages firstPageResult
-                    paginationConfig = Jira.Pagination.paginationConfig (List.length firstPageItems)
+                    firstPageItems =
+                        Jira.Pagination.getItems firstPageResult
+
+                    pagesCount =
+                        Jira.Pagination.totalPages firstPageResult
+
+                    paginationConfig =
+                        Jira.Pagination.paginationConfig (List.length firstPageItems)
                 in
                 Task.sequence
-                    ( (Task.succeed firstPageItems) ::
-                      ( (List.range 2 pagesCount)
-                        |> List.map (Jira.Pagination.pageRequest paginationConfig)
-                        |> List.map (\pageRequest -> pageFetchTask cred pageRequest)
-                        |> List.map (Task.map Jira.Pagination.getItems)
-                      )
+                    (Task.succeed firstPageItems
+                        :: (List.range 2 pagesCount
+                                |> List.map (Jira.Pagination.pageRequest paginationConfig)
+                                |> List.map (\pageRequest -> pageFetchTask cred pageRequest)
+                                |> List.map (Task.map Jira.Pagination.getItems)
+                           )
                     )
-                |> Task.map List.concat
+                    |> Task.map List.concat
             )
 
+
 getAllProjects : Cred -> ApiTask (List Project)
-getAllProjects cred = getAll getProjects cred
+getAllProjects cred =
+    getAll getProjects cred

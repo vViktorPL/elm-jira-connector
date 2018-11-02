@@ -2,6 +2,7 @@ module Jira.Pagination exposing
     ( Page
     , PageRequest
     , PaginationConfig
+    , getItems
     , isLast
     , nextPage
     , pageDecoder
@@ -10,7 +11,6 @@ module Jira.Pagination exposing
     , pageRequestToQueryParams
     , paginationConfig
     , totalPages
-    , getItems
     )
 
 import Json.Decode as D exposing (Decoder)
@@ -48,8 +48,11 @@ totalPages : Page a -> Int
 totalPages (Page page) =
     ceiling (toFloat page.total / toFloat page.maxResults)
 
+
 pageSize : Page a -> Int
-pageSize (Page page) = page.maxResults
+pageSize (Page page) =
+    page.maxResults
+
 
 nextPage : Page a -> Maybe PageRequest
 nextPage page =
@@ -89,9 +92,11 @@ pageRequestToQueryParams (PageRequest itemsPerPage page) =
     , Url.Builder.int "maxResults" itemsPerPage
     ]
 
+
 getItems : Page a -> List a
 getItems (Page page) =
     page.values
+
 
 pageDecoder : Decoder item -> Decoder (Page item)
 pageDecoder itemDecoder =
