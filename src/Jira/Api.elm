@@ -1,4 +1,4 @@
-module Jira.Api exposing (Cred, ApiCallError, Project, createAnonymousCred, createBasicAuthCred, getProjectData, getProjects, apiErrorToString)
+module Jira.Api exposing (Cred, ApiCallError, Project, createAnonymousCred, createBasicAuthCred, getProjectData, getProjects, getAllProjects, apiErrorToString)
 
 import Base64
 import Http
@@ -6,6 +6,7 @@ import Jira.Pagination exposing (Page, PageRequest, pageDecoder, pageRequestToQu
 import Json.Decode as D
 import Regex
 import Url.Builder
+import Task exposing (Task)
 
 
 type JiraUrl
@@ -107,8 +108,8 @@ createBasicAuthCred urlToJira ( username, password ) =
             )
 
 
-apiGet : ApiMsg msg response -> D.Decoder response -> Cred -> String -> Cmd msg
-apiGet msg decoder cred resource =
+apiGet : D.Decoder response -> Cred -> String -> ApiTask response
+apiGet decoder cred resource =
      { method = "GET"
      , headers = []
      , url = resource
@@ -119,17 +120,16 @@ apiGet msg decoder cred resource =
      }
         |> authorizeApiRequestConfig cred
         |> Http.request
-        |> Http.send (\result ->
-            case result of
-                Ok response -> msg (Ok response)
-                Err (Http.BadStatus response) ->
+        |> Http.toTask
+        |> Task.mapError (\err ->
+            case err of
+                Http.BadStatus response ->
                     if response.status.code == 401 then
-                        msg (Err (InvalidCreds "Invalid user or password"))
+                        InvalidCreds "Invalid user or password"
                     else
-                        msg (Err (HttpError (Http.BadStatus response)))
-                Err httpError -> msg (Err (HttpError httpError))
+                        HttpError (Http.BadStatus response)
+                httpError -> HttpError httpError
         )
-
 
 type alias RequestConfig a =
     { method : String
@@ -176,13 +176,13 @@ projectDecoder =
             (D.field "self" D.string)
             (D.field "simplified" D.bool)
 
--- API COMMANDS
+-- API TASKS
 
-type alias ApiMsg msg response =
-    Result ApiCallError response -> msg
+type alias ApiTask response =
+    Task ApiCallError response
 
-getProjects : ApiMsg msg (Page Project) -> Cred -> PageRequest -> Cmd msg
-getProjects msg cred pagination =
+getProjects : Cred -> PageRequest -> ApiTask (Page Project)
+getProjects cred pagination =
     let
         decoder =
             pageDecoder projectDecoder
@@ -193,5 +193,32 @@ getProjects msg cred pagination =
         resource =
             Url.Builder.absolute [ "project", "search" ] queryParams
     in
-    apiGet msg decoder cred resource
+    apiGet decoder cred resource
 
+requestPageForFetchAllTask =
+    Jira.Pagination.pageRequest (Jira.Pagination.paginationConfig 500) 1
+
+
+getAll : (Cred -> PageRequest -> ApiTask (Page a)) -> Cred -> ApiTask (List a)
+getAll pageFetchTask cred =
+    pageFetchTask cred requestPageForFetchAllTask
+        |> Task.andThen
+            (\firstPageResult ->
+                let
+                    firstPageItems = Jira.Pagination.getItems firstPageResult
+                    pagesCount = Jira.Pagination.totalPages firstPageResult
+                    paginationConfig = Jira.Pagination.paginationConfig (List.length firstPageItems)
+                in
+                Task.sequence
+                    ( (Task.succeed firstPageItems) ::
+                      ( (List.range 2 pagesCount)
+                        |> List.map (Jira.Pagination.pageRequest paginationConfig)
+                        |> List.map (\pageRequest -> pageFetchTask cred pageRequest)
+                        |> List.map (Task.map Jira.Pagination.getItems)
+                      )
+                    )
+                |> Task.map List.concat
+            )
+
+getAllProjects : Cred -> ApiTask (List Project)
+getAllProjects cred = getAll getProjects cred
