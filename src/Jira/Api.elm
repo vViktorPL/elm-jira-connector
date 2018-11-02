@@ -1,14 +1,40 @@
 module Jira.Api exposing
-    ( ApiCallError
-    , Cred
+    ( Cred, createAnonymousCred, createBasicAuthCred
     , Project
-    , apiErrorToString
-    , createAnonymousCred
-    , createBasicAuthCred
-    , getAllProjects
+    , getProjects, getAllProjects
     , getProjectData
-    , getProjects
+    , ApiCallError, apiErrorToString
     )
+
+{-| This library helps in communication with Jira REST API by exposing API requests as
+straightforward tasks and Jira resources data into some opaque types.
+
+
+# Credentials
+
+@docs Cred, createAnonymousCred, createBasicAuthCred
+
+
+# Jira entities
+
+@docs Project
+
+
+# API call tasks
+
+@docs getProjects, getAllProjects
+
+
+# Data
+
+@docs getProjectData
+
+
+# Errors
+
+@docs ApiCallError, apiErrorToString
+
+-}
 
 import Base64
 import Http
@@ -23,6 +49,8 @@ type JiraUrl
     = JiraUrl String
 
 
+{-| Authentication credentials
+-}
 type Cred
     = Anonymous JiraUrl
     | BasicAuth JiraUrl ( String, String )
@@ -40,6 +68,8 @@ type alias Avatar =
     ( AvatarDimensions, AvatarUrl )
 
 
+{-| Jira Project
+-}
 type Project
     = Project ProjectData
 
@@ -56,11 +86,15 @@ type alias ProjectData =
     }
 
 
+{-| Error from api call request task
+-}
 type ApiCallError
     = HttpError Http.Error
     | InvalidCreds String
 
 
+{-| Convert API call error to a simple string
+-}
 apiErrorToString : ApiCallError -> String
 apiErrorToString error =
     case error of
@@ -74,6 +108,8 @@ apiErrorToString error =
             errDetails
 
 
+{-| Extract raw data from Project
+-}
 getProjectData : Project -> ProjectData
 getProjectData (Project projectData) =
     projectData
@@ -96,12 +132,16 @@ createJiraUrlFromString url =
             Err "Invalid URL"
 
 
+{-| Create credentials for publicly open Jira (as an anonymous user)
+-}
 createAnonymousCred : String -> Result String Cred
 createAnonymousCred jiraUrl =
     createJiraUrlFromString jiraUrl
         |> Result.map Anonymous
 
 
+{-| Create credentials using basic auth method
+-}
 createBasicAuthCred : String -> ( String, String ) -> Result String Cred
 createBasicAuthCred urlToJira ( username, password ) =
     createJiraUrlFromString urlToJira
@@ -205,6 +245,8 @@ type alias ApiTask response =
     Task ApiCallError response
 
 
+{-| Get page of projects
+-}
 getProjects : Cred -> PageRequest -> ApiTask (Page Project)
 getProjects cred pagination =
     let
@@ -251,6 +293,8 @@ getAll pageFetchTask cred =
             )
 
 
+{-| Get all projects
+-}
 getAllProjects : Cred -> ApiTask (List Project)
 getAllProjects cred =
     getAll getProjects cred

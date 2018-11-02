@@ -1,26 +1,34 @@
 module Jira.Pagination exposing
-    ( Page
-    , PageRequest
-    , PaginationConfig
-    , getItems
-    , isLast
-    , nextPage
-    , pageDecoder
-    , pageNumber
-    , pageRequest
-    , pageRequestToQueryParams
-    , paginationConfig
-    , totalPages
+    ( PaginationConfig, PageRequest, paginationConfig, pageRequest, pageRequestToQueryParams
+    , Page, getItems, isLast, nextPage, pageNumber, totalPages, pageDecoder
     )
+
+{-| This module wraps paginated responses from Jira API
+
+
+# Page requests
+
+@docs PaginationConfig, PageRequest, paginationConfig, pageRequest, pageRequestToQueryParams
+
+
+# Pages
+
+@docs Page, getItems, isLast, nextPage, pageNumber, totalPages, pageDecoder
+
+-}
 
 import Json.Decode as D exposing (Decoder)
 import Url.Builder exposing (QueryParameter)
 
 
+{-| Represents data that is required to build a request for a specific page
+-}
 type PageRequest
     = PageRequest Int Int
 
 
+{-| Pagination configuration which is just the limit of items per page.
+-}
 type PaginationConfig
     = PaginationConfig Int
 
@@ -35,25 +43,36 @@ type alias PageInternals item =
     }
 
 
+{-| Wraps up data from a decoded response of specific page request
+-}
 type Page item
     = Page (PageInternals item)
 
 
+{-| Is the page the last one?
+-}
 isLast : Page a -> Bool
 isLast (Page page) =
     page.isLast
 
 
+{-| Extract total number of pages
+-}
 totalPages : Page a -> Int
 totalPages (Page page) =
     ceiling (toFloat page.total / toFloat page.maxResults)
 
 
+{-| What is the limit of the results per page?
+-}
 pageSize : Page a -> Int
 pageSize (Page page) =
     page.maxResults
 
 
+{-| Get PageRequest for the page which is next to the provided one.
+There could be no next page hence Maybe return type.
+-}
 nextPage : Page a -> Maybe PageRequest
 nextPage page =
     case isLast page of
@@ -71,21 +90,29 @@ nextPage page =
             Just (pageRequest config nextPageNumber)
 
 
+{-| Get page number
+-}
 pageNumber : Page a -> Int
 pageNumber (Page page) =
     ceiling (toFloat page.startAt / toFloat page.maxResults) + 1
 
 
+{-| Create a pagination configuration
+-}
 paginationConfig : Int -> PaginationConfig
 paginationConfig itemsPerPage =
     PaginationConfig itemsPerPage
 
 
+{-| Create a PageRequest for specific page number
+-}
 pageRequest : PaginationConfig -> Int -> PageRequest
 pageRequest (PaginationConfig itemsPerPage) page =
     PageRequest itemsPerPage page
 
 
+{-| Convert page request to query parameters that can be used to build a request URL
+-}
 pageRequestToQueryParams : PageRequest -> List QueryParameter
 pageRequestToQueryParams (PageRequest itemsPerPage page) =
     [ Url.Builder.int "startAt" ((page - 1) * itemsPerPage)
@@ -93,11 +120,15 @@ pageRequestToQueryParams (PageRequest itemsPerPage page) =
     ]
 
 
+{-| Extract a list of items from a page
+-}
 getItems : Page a -> List a
 getItems (Page page) =
     page.values
 
 
+{-| Page decoder. Requires decoder for paginated entity.
+-}
 pageDecoder : Decoder item -> Decoder (Page item)
 pageDecoder itemDecoder =
     D.map Page
