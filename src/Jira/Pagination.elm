@@ -1,6 +1,6 @@
 module Jira.Pagination exposing
     ( PaginationConfig, PageRequest, paginationConfig, pageRequest, pageRequestToQueryParams
-    , Page, getItems, isLast, nextPage, pageNumber, totalPages, pageDecoder
+    , Page, getItems, isLast, nextPage, pageNumber, totalPages, pageDecoder, map
     )
 
 {-| This module wraps paginated responses from Jira API
@@ -13,7 +13,7 @@ module Jira.Pagination exposing
 
 # Pages
 
-@docs Page, getItems, isLast, nextPage, pageNumber, totalPages, pageDecoder
+@docs Page, getItems, isLast, nextPage, pageNumber, totalPages, pageDecoder, map
 
 -}
 
@@ -34,8 +34,7 @@ type PaginationConfig
 
 
 type alias PageInternals item =
-    { self : String
-    , maxResults : Int
+    { maxResults : Int
     , startAt : Int
     , total : Int
     , isLast : Bool
@@ -131,12 +130,41 @@ getItems (Page page) =
 -}
 pageDecoder : Decoder item -> Decoder (Page item)
 pageDecoder itemDecoder =
-    D.map Page
-        (D.map6 PageInternals
-            (D.field "self" D.string)
-            (D.field "maxResults" D.int)
-            (D.field "startAt" D.int)
-            (D.field "total" D.int)
-            (D.field "isLast" D.bool)
-            (D.field "values" (D.list itemDecoder))
+    D.map5
+        (\maxResults startAt total maybeIsLast values ->
+            Page
+                { maxResults = maxResults
+                , startAt = startAt
+                , total = total
+                , isLast =
+                    case maybeIsLast of
+                        Just isLastValue ->
+                            isLastValue
+
+                        Nothing ->
+                            startAt + List.length values < total
+                , values = values
+                }
         )
+        (D.field "maxResults" D.int)
+        (D.field "startAt" D.int)
+        (D.field "total" D.int)
+        (D.maybe (D.field "isLast" D.bool))
+        (D.oneOf
+            [ D.field "values" (D.list itemDecoder)
+            , D.field "issues" (D.list itemDecoder)
+            ]
+        )
+
+
+{-| Map page items
+-}
+map : (a -> b) -> Page a -> Page b
+map f (Page page) =
+    Page
+        { maxResults = page.maxResults
+        , startAt = page.startAt
+        , total = page.total
+        , isLast = page.isLast
+        , values = List.map f page.values
+        }

@@ -1,8 +1,9 @@
 module Jira.Api exposing
     ( Cred, createAnonymousCred, createBasicAuthCred
-    , Project
-    , getProjects, getAllProjects
-    , getProjectData
+    , Project, Issue
+    , ApiTask, getProjects, getAllProjects, getIssues, getFullIssues
+    , allFields, allFieldsExcept
+    , getProjectData, getIssueId, getIssueKey, getIssueFields
     , ApiCallError, apiErrorToString
     )
 
@@ -17,17 +18,22 @@ straightforward tasks and Jira resources data into some opaque types.
 
 # Jira entities
 
-@docs Project
+@docs Project, Issue
 
 
 # API call tasks
 
-@docs getProjects, getAllProjects
+@docs ApiTask, getProjects, getAllProjects, getIssues, getFullIssues
 
 
-# Data
+# API call helpers
 
-@docs getProjectData
+@docs allFields, allFieldsExcept
+
+
+# Data getters
+
+@docs getProjectData, getIssueId, getIssueKey, getIssueFields
 
 
 # Errors
@@ -38,6 +44,7 @@ straightforward tasks and Jira resources data into some opaque types.
 
 import Base64
 import Http
+import Jira.JqlInternal exposing (Jql)
 import Jira.Pagination exposing (Page, PageRequest, pageDecoder, pageRequestToQueryParams)
 import Json.Decode as D
 import Regex
@@ -72,6 +79,19 @@ type alias Avatar =
 -}
 type Project
     = Project ProjectData
+
+
+{-| Jira Issue
+-}
+type Issue
+    = Issue IssueData
+
+
+type alias IssueData =
+    { id : String
+    , key : String
+    , fields : D.Value
+    }
 
 
 type alias ProjectData =
@@ -113,6 +133,29 @@ apiErrorToString error =
 getProjectData : Project -> ProjectData
 getProjectData (Project projectData) =
     projectData
+
+
+{-| Get issue id
+-}
+getIssueId : Issue -> String
+getIssueId (Issue issue) =
+    issue.id
+
+
+{-| Get issue key
+-}
+getIssueKey : Issue -> String
+getIssueKey (Issue issue) =
+    issue.key
+
+
+{-| Get issue fields.
+Note: as structure of available fields vary depending on requested fields configuration, you have to decode the fields
+that you are interested in.
+-}
+getIssueFields : Issue -> D.Value
+getIssueFields (Issue issue) =
+    issue.fields
 
 
 createJiraUrlFromString : String -> Result String JiraUrl
@@ -237,10 +280,21 @@ projectDecoder =
             (D.field "simplified" D.bool)
 
 
+issueDecoder : D.Decoder Issue
+issueDecoder =
+    D.map Issue <|
+        D.map3 IssueData
+            (D.field "id" D.string)
+            (D.field "key" D.string)
+            (D.field "fields" D.value)
+
+
 
 -- API TASKS
 
 
+{-| Jira API call task
+-}
 type alias ApiTask response =
     Task ApiCallError response
 
@@ -260,6 +314,47 @@ getProjects cred pagination =
             Url.Builder.absolute [ "project", "search" ] queryParams
     in
     apiGet decoder cred resource
+
+
+{-| Search for issues using Jql with and scoping available fields per issue
+-}
+getIssues : Cred -> PageRequest -> Jql -> List String -> ApiTask (Page Issue)
+getIssues cred pagination jql fields =
+    let
+        decoder =
+            pageDecoder issueDecoder
+
+        queryParams =
+            Url.Builder.string "jql" jql
+                :: Url.Builder.string "fields" (String.join "," fields)
+                :: Url.Builder.string "properties" "id,key,summary"
+                :: pageRequestToQueryParams pagination
+
+        resource =
+            Url.Builder.absolute [ "search" ] queryParams
+    in
+    apiGet decoder cred resource
+
+
+{-| Search for issues using Jql with all fields per issue
+-}
+getFullIssues : Cred -> PageRequest -> Jql -> ApiTask (Page Issue)
+getFullIssues cred pagination jql =
+    getIssues cred pagination jql allFields
+
+
+{-| Fields scope where all fields are requested
+-}
+allFields : List String
+allFields =
+    [ "*all" ]
+
+
+{-| Fields scope where all fields except provided ones are requested
+-}
+allFieldsExcept : List String -> List String
+allFieldsExcept exceptions =
+    allFields ++ List.map ((++) "-") exceptions
 
 
 requestPageForFetchAllTask =

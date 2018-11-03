@@ -7,7 +7,9 @@
     "version": "0.0.1",
     "exposed-modules": [
         "Jira.Api",
-        "Jira.Pagination"
+        "Jira.Pagination",
+        "Jira.Jql",
+        "Jira.Api.Extra"
     ],
     "elm-version": "0.19.0 <= v < 0.20.0",
     "dependencies": {
