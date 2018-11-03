@@ -1,10 +1,9 @@
 {
     "type": "package",
-    "name": "vViktorPL/jira-connector",
+    "name": "vViktorPL/elm-jira-connector",
     "summary": "A wrapper for Jira API",
-    "repository": "https://github.com/vViktorPL/elm-jira-connector",
     "license": "MIT",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "exposed-modules": [
         "Jira.Api",
         "Jira.Pagination",
