@@ -1,6 +1,11 @@
 # Elm Jira connector
 JIRA API connector package for Elm.
 
+## Example
+
+You can find an exemplary frontend app which uses this package on GitHub:
+[vViktorPL/elm-jira-connector-example](https://github.com/vViktorPL/elm-jira-connector-example)
+
 ## Troubleshooting
 ### CORS
 Unfortunately JIRA REST API CORS won't let you in from your SPA domain. Although, to solve this problem

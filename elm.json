@@ -3,7 +3,7 @@
     "name": "vViktorPL/elm-jira-connector",
     "summary": "A wrapper for Jira API",
     "license": "MIT",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "exposed-modules": [
         "Jira.Api",
         "Jira.Pagination",
