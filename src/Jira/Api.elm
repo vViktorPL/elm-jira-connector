@@ -160,19 +160,14 @@ getIssueFields (Issue issue) =
 
 createJiraUrlFromString : String -> Result String JiraUrl
 createJiraUrlFromString url =
-    let
-        urlPattern =
-            Maybe.withDefault Regex.never <|
-                Regex.fromStringWith
-                    { caseInsensitive = True, multiline = False }
-                    "^(?:(https?://)?)([-a-zA-Z0-9@:%._\\+~#=]{2,256}\\.[a-z]{2,6}\\b([-a-zA-Z0-9@:%_\\+.~#?&//=]*))\\/?$"
-    in
-    case List.map .match (Regex.find urlPattern url) of
-        [ host ] ->
-            Ok (JiraUrl ("https://" ++ host ++ "/rest/api/3"))
+    Ok <|
+        JiraUrl
+            (if String.endsWith "/" url then
+                url ++ "rest/api/3"
 
-        _ ->
-            Err "Invalid URL"
+             else
+                url ++ "/rest/api/3"
+            )
 
 
 {-| Create credentials for publicly open Jira (as an anonymous user)
