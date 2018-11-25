@@ -1,9 +1,10 @@
 module Jira.Api exposing
     ( Cred, createAnonymousCred, createBasicAuthCred
-    , Project, Issue
-    , ApiTask, getProjects, getAllProjects, getIssues, getFullIssues
+    , Project, Issue, Worklog, WorklogRequest, Content
+    , ApiTask, getProjects, getAllProjects, getIssues, getFullIssues, addWorklog, addWorklogToIssueByKeyOrId
     , allFields, allFieldsExcept
     , getProjectData, getIssueId, getIssueKey, getIssueFields
+    , contentFromString
     , ApiCallError, apiErrorToString
     )
 
@@ -18,12 +19,12 @@ straightforward tasks and Jira resources data into some opaque types.
 
 # Jira entities
 
-@docs Project, Issue
+@docs Project, Issue, Worklog, WorklogRequest, Content
 
 
 # API call tasks
 
-@docs ApiTask, getProjects, getAllProjects, getIssues, getFullIssues
+@docs ApiTask, getProjects, getAllProjects, getIssues, getFullIssues, addWorklog, addWorklogToIssueByKeyOrId
 
 
 # API call helpers
@@ -36,6 +37,11 @@ straightforward tasks and Jira resources data into some opaque types.
 @docs getProjectData, getIssueId, getIssueKey, getIssueFields
 
 
+# Data creators
+
+@docs contentFromString
+
+
 # Errors
 
 @docs ApiCallError, apiErrorToString
@@ -44,11 +50,14 @@ straightforward tasks and Jira resources data into some opaque types.
 
 import Base64
 import Http
+import Iso8601
 import Jira.JqlInternal exposing (Jql)
 import Jira.Pagination exposing (Page, PageRequest, pageDecoder, pageRequestToQueryParams)
 import Json.Decode as D
+import Json.Encode as E
 import Regex
 import Task exposing (Task)
+import Time exposing (Posix)
 import Url.Builder
 
 
@@ -104,6 +113,27 @@ type alias ProjectData =
     , self : String
     , simplified : Bool
     }
+
+
+{-| Structure used to add new worklog to an issue
+-}
+type alias WorklogRequest =
+    { started : Posix
+    , timeSpentSeconds : Int
+    , comment : Maybe Content
+    }
+
+
+{-| Issue worklog entry
+-}
+type Worklog
+    = Worklog D.Value
+
+
+{-| Content which is used across comments, descriptions etc
+-}
+type Content
+    = SimpleText String
 
 
 {-| Error from api call request task
@@ -200,12 +230,47 @@ createBasicAuthCred urlToJira ( username, password ) =
             )
 
 
+{-| Create text content
+-}
+contentFromString : String -> Content
+contentFromString string =
+    SimpleText string
+
+
 apiGet : D.Decoder response -> Cred -> String -> ApiTask response
 apiGet decoder cred resource =
     { method = "GET"
     , headers = []
     , url = resource
     , body = Http.emptyBody
+    , expect = Http.expectJson decoder
+    , timeout = Nothing
+    , withCredentials = False
+    }
+        |> authorizeApiRequestConfig cred
+        |> Http.request
+        |> Http.toTask
+        |> Task.mapError
+            (\err ->
+                case err of
+                    Http.BadStatus response ->
+                        if response.status.code == 401 then
+                            InvalidCreds "Invalid user or password"
+
+                        else
+                            HttpError (Http.BadStatus response)
+
+                    httpError ->
+                        HttpError httpError
+            )
+
+
+apiPost : D.Decoder response -> Cred -> String -> E.Value -> ApiTask response
+apiPost decoder cred resource bodyValue =
+    { method = "POST"
+    , headers = []
+    , url = resource
+    , body = Http.jsonBody bodyValue
     , expect = Http.expectJson decoder
     , timeout = Nothing
     , withCredentials = False
@@ -282,6 +347,65 @@ issueDecoder =
             (D.field "id" D.string)
             (D.field "key" D.string)
             (D.field "fields" D.value)
+
+
+worklogDecoder : D.Decoder Worklog
+worklogDecoder =
+    D.map Worklog D.value
+
+
+
+-- ENCODING
+
+
+encodeContent : Content -> E.Value
+encodeContent content =
+    case content of
+        SimpleText text ->
+            E.object
+                [ ( "type", E.string "doc" )
+                , ( "version", E.int 1 )
+                , ( "content"
+                  , E.list identity
+                        [ E.object
+                            [ ( "type", E.string "paragraph" )
+                            , ( "content"
+                              , E.list identity
+                                    [ E.object
+                                        [ ( "type", E.string "text" )
+                                        , ( "text", E.string text )
+                                        ]
+                                    ]
+                              )
+                            ]
+                        ]
+                  )
+                ]
+
+
+encodeWorklogRequest : WorklogRequest -> E.Value
+encodeWorklogRequest worklogRequest =
+    E.object
+        ([ ( "started", encodePosix worklogRequest.started )
+         , ( "timeSpentSeconds", E.int worklogRequest.timeSpentSeconds )
+         ]
+            ++ (case worklogRequest.comment of
+                    Just comment ->
+                        [ ( "comment", encodeContent comment ) ]
+
+                    Nothing ->
+                        []
+               )
+        )
+
+
+encodePosix : Posix -> E.Value
+encodePosix posix =
+    posix
+        |> Iso8601.fromTime
+        |> String.replace "Z" "+0000"
+        -- for some reason JIRA REST API does not accept "Z" timezone
+        |> E.string
 
 
 
@@ -388,3 +512,37 @@ getAll pageFetchTask cred =
 getAllProjects : Cred -> ApiTask (List Project)
 getAllProjects cred =
     getAll getProjects cred
+
+
+{-| Add worklog to an issue
+
+    addWorklog cred
+        issue
+        { started = Posix.millisToPosix 1543173302785
+        , timeSpentSeconds = 3600
+        , comment = Just (contentFromString "Some comment")
+        }
+
+-}
+addWorklog : Cred -> Issue -> WorklogRequest -> ApiTask Worklog
+addWorklog cred issue worklogRequest =
+    addWorklogToIssueByKeyOrId cred (getIssueKey issue) worklogRequest
+
+
+{-| Add worklog to an issue by it's key or id:
+
+    addWorklog cred
+        "EXA-1"
+        { started = Time.millisToPosix 1543173302785
+        , timeSpentSeconds = 3600
+        , comment = Just (contentFromString "Some comment")
+        }
+
+-}
+addWorklogToIssueByKeyOrId : Cred -> String -> WorklogRequest -> ApiTask Worklog
+addWorklogToIssueByKeyOrId cred issueKeyOrId worklogRequest =
+    apiPost
+        worklogDecoder
+        cred
+        ("/issue/" ++ issueKeyOrId ++ "/worklog")
+        (encodeWorklogRequest worklogRequest)
