@@ -1,9 +1,9 @@
 module Jira.Api exposing
     ( Cred, createAnonymousCred, createBasicAuthCred
-    , Project, Issue, Worklog, WorklogRequest, Content
+    , Project, Issue, Worklog, WorklogRequest, WorklogData, Content
     , ApiTask, getProjects, getAllProjects, getIssues, getFullIssues, addWorklog, addWorklogToIssueByKeyOrId
     , allFields, allFieldsExcept
-    , getProjectData, getIssueId, getIssueKey, getIssueFields
+    , getProjectData, getIssueId, getIssueKey, getIssueFields, getWorklogData
     , contentFromString
     , ApiCallError, apiErrorToString
     )
@@ -19,7 +19,7 @@ straightforward tasks and Jira resources data into some opaque types.
 
 # Jira entities
 
-@docs Project, Issue, Worklog, WorklogRequest, Content
+@docs Project, Issue, Worklog, WorklogRequest, WorklogData, Content
 
 
 # API call tasks
@@ -34,7 +34,7 @@ straightforward tasks and Jira resources data into some opaque types.
 
 # Data getters
 
-@docs getProjectData, getIssueId, getIssueKey, getIssueFields
+@docs getProjectData, getIssueId, getIssueKey, getIssueFields, getWorklogData
 
 
 # Data creators
@@ -54,6 +54,7 @@ import Iso8601
 import Jira.JqlInternal exposing (Jql)
 import Jira.Pagination exposing (Page, PageRequest, pageDecoder, pageRequestToQueryParams)
 import Json.Decode as D
+import Json.Decode.Pipeline exposing (hardcoded, optional, required)
 import Json.Encode as E
 import Regex
 import Task exposing (Task)
@@ -127,7 +128,22 @@ type alias WorklogRequest =
 {-| Issue worklog entry
 -}
 type Worklog
-    = Worklog D.Value
+    = Worklog WorklogData
+
+
+{-| Persisted worklog details
+-}
+type alias WorklogData =
+    { id : String
+    , issueId : String
+    , created : Posix
+    , started : Posix
+    , updated : Posix
+    , timeSpent : String
+    , timeSpentSeconds : Int
+    , author : D.Value
+    , updateAuthor : D.Value
+    }
 
 
 {-| Content which is used across comments, descriptions etc
@@ -351,7 +367,42 @@ issueDecoder =
 
 worklogDecoder : D.Decoder Worklog
 worklogDecoder =
-    D.map Worklog D.value
+    D.map Worklog
+        (D.succeed WorklogData
+            |> required "id" D.string
+            |> required "issueId" D.string
+            |> required "created" posixDecoder
+            |> required "started" posixDecoder
+            |> required "updated" posixDecoder
+            |> required "timeSpent" D.string
+            |> required "timeSpentSeconds" D.int
+            |> required "author" D.value
+            |> required "updateAuthor" D.value
+        )
+
+
+posixDecoder : D.Decoder Posix
+posixDecoder =
+    D.string
+        |> D.map
+            (\string ->
+                if String.right 1 string == "Z" then
+                    string
+
+                else
+                    -- fix for timezones i.e. "+0100" -> "+01:00"
+                    String.dropRight 2 string ++ ":" ++ String.right 2 string
+            )
+        |> D.map Iso8601.toTime
+        |> D.andThen
+            (\parsingResult ->
+                case parsingResult of
+                    Ok posix ->
+                        D.succeed posix
+
+                    Err _ ->
+                        D.fail "Invalid date string format"
+            )
 
 
 
@@ -546,3 +597,10 @@ addWorklogToIssueByKeyOrId cred issueKeyOrId worklogRequest =
         cred
         ("/issue/" ++ issueKeyOrId ++ "/worklog")
         (encodeWorklogRequest worklogRequest)
+
+
+{-| Get data from worklog
+-}
+getWorklogData : Worklog -> WorklogData
+getWorklogData (Worklog worklogData) =
+    worklogData
